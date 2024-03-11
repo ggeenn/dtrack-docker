@@ -1,0 +1,6 @@
+{
+  "remoteHost": "host_name",
+  "pemFile": "key_file",
+  "remoteUser": "deeprisk",
+  "ports": [48000, 48081, 48086, 48080]
+}
