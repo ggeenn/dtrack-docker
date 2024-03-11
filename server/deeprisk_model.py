@@ -1,17 +1,27 @@
-from pydantic import BaseModel
-# from pydantic import PyObjectId
-# from pydantic import Field
-# from pydantic import ConfigDict
+import logging
+import re
 
-# class PackageModel(BaseModel):
-#     id: Optional[PyObjectId] = Field(alias="_id", default=None)
-#     githuburl: str = Field(...)
-#     model_config = ConfigDict(
-#         populate_by_name=True,
-#         arbitrary_types_allowed=True,
-#         json_schema_extra={
-#             "pkg:maven/androidx.arch.core/core-common": {
-#                 "githuburl": "https://github.com/androidx/androidx",
-#             }
-#         },
-#     )
+from fastapi import FastAPI, HTTPException
+from typing import List
+from motor.motor_asyncio import AsyncIOMotorClient
+
+logger = logging.getLogger(__name__)
+
+class DeepriskModel:
+    def __init__(self, uri, name):
+        self.client = AsyncIOMotorClient(uri)
+        self.db = self.client.get_database(name)
+
+    def close(self):
+        self.db.client.close()
+
+def parse_purl(purl):
+    try:
+        if '?' in purl:
+            ptype, pname, psubname, pver, _ = re.split(r'[?@/]', purl)
+        else:
+            ptype, pname, psubname, pver = re.split(r'[@/]', purl)
+        return True, ptype, pname, psubname, pver
+    except Exception as e:
+        logger.error(f"Can't parse {purl}\n Error {e}")
+        return False, '', '', '', ''

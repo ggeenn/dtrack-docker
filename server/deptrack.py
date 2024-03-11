@@ -1,5 +1,6 @@
 import requests
 import json
+import uuid
 
 def json2file(data, filename):
     with open(filename, 'w') as file:
@@ -9,19 +10,33 @@ class DepTrack:
     def __init__(self, url, api_key):
         self.base_url = f'{url}/api/v1'
         self.headers = {'X-Api-Key': api_key}
+        #self.post_headers = {"accept": "application/json", "Content-Type": "application/json"} | self.headers
 
-    def get_json(self, path, params=None):
+    def get_json(self, path, params=None, raw=False):
         url = f'{self.base_url}/{path}'
         r = requests.get(url, params=params, headers=self.headers)
         if r.status_code != 200:
             raise RuntimeError(f'{url} failed : {r.status_code}')
+        return r.text if raw else r.json()
+    
+    def post_json(self, path, val=None):
+        url = f'{self.base_url}/{path}'
+        r = requests.post(url, headers=self.headers, json=val)
+        if r.status_code != 200:
+            raise RuntimeError(f'{url} failed : {r.status_code} : {r.text}')
+    
+    def put_json(self, path, val=None):
+        url = f'{self.base_url}/{path}'
+        r = requests.put(url, headers=self.headers, json=val)
+        if r.status_code not in [200, 201]:
+            raise RuntimeError(f'{url} failed : {r.status_code} : {r.text}')
         return r.json()
     
-    def post_json(self, path):
+    def delete_json(self, path):
         url = f'{self.base_url}/{path}'
-        r = requests.post(url, headers=self.headers)
-        if r.status_code != 200:
-            raise RuntimeError(f'{url} failed : {r.status_code}')
+        r = requests.delete(url, headers=self.headers)
+        if r.status_code not in [200, 204]:
+            raise RuntimeError(f'{url} failed : {r.status_code} : {r.text}')
     
     def get_projects(self):
         return self.get_json('project')
@@ -49,3 +64,25 @@ class DepTrack:
             return
         c = components[0]
         self.post_json(f'vulnerability/{vuln_id}/component/{c["uuid"]}')
+
+    def create_vuln(self, title, description):
+        vuln_id = self.get_json('vulnerability/vulnId', raw=True)
+        v = {
+                "vulnId": vuln_id,
+                "source": "INTERNAL",
+                "title": title,
+                "description": description,
+                "severity": "CRITICAL",
+            }
+        r = self.put_json('vulnerability', val=v)
+        return r["uuid"]
+    
+    def update_vuln(self, vuln_id, description):
+        v = {
+                "uuid": vuln_id,
+                "description": description,
+            }
+        self.post_json('vulnerability', val=v)
+
+    def delete_vuln(self, uuid):
+        self.delete_json(f'vulnerability/{uuid}')

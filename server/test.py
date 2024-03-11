@@ -1,11 +1,7 @@
-import os
 import deptrack
 
-dtapi_host = os.environ['DEEPRISK_DTAPI_HOST']
-dtapi_token = os.environ['DEEPRISK_DTAPI_TOKEN']
-dtapi_vuln_id = os.environ['DEEPRISK_DTAPI_VULN_ID']
-
-dtapi = deptrack.DepTrack(f'http://{dtapi_host}:8080', dtapi_token)
-projects = dtapi.get_projects()
-for p in projects:
-    print(f"{p['name']} was found, id = {p['uuid']}")
+dt = deptrack.DepTrack('http://localhost:48086', 'odt_NSedF4mIzlqbexVIHpEd8tPRw1h1XAvz')
+vid = dt.create_vuln('Malicious Contributor', 'Ivan Ivanov')
+print(f'{vid}')
+purl = 'pkg:maven/androidx.annotation/annotation@1.6.0?type=jar'
+dt.assign_vuln_by_purl(purl, vid)

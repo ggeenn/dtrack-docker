@@ -6,9 +6,12 @@ from fastapi import FastAPI, HTTPException
 from typing import List
 from motor.motor_asyncio import AsyncIOMotorClient
 
-import deeprisk_model
+from deeprisk_model import DeepriskModel
+from deeprisk_model import parse_purl
 import deptrack
 import githist
+
+from collections import defaultdict
 
 mongo_user = os.environ['DEEPRISK_MONGO_USER']
 mongo_password = os.environ['DEEPRISK_MONGO_PASS']
@@ -24,18 +27,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-db = None
+#db = None
+model = None
 dtapi = None
 
 dtapi_host = os.environ['DEEPRISK_DTAPI_HOST']
 dtapi_token = os.environ['DEEPRISK_DTAPI_TOKEN']
+#dtapi_token = 'odt_NSedF4mIzlqbexVIHpEd8tPRw1h1XAvz'
 dtapi_vuln_id = os.environ['DEEPRISK_DTAPI_VULN_ID']
 
 @app.on_event("startup")
 async def startup_db_client():
-    global db
-    client = AsyncIOMotorClient(mongo_uri)
-    db = client.get_database(mongo_db_name)
+    global model
+    model = DeepriskModel(mongo_uri, mongo_db_name)
+    #client = AsyncIOMotorClient(mongo_uri)
+    #db = client.get_database(mongo_db_name)
     dtstatus = ''
     global dtapi
     try:
@@ -49,7 +55,8 @@ async def startup_db_client():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    db.client.close()
+    #db.client.close()
+    model.close()
 
 @app.get("/")
 async def read_root():
@@ -63,18 +70,21 @@ async def start_scan():
     logger.info("Scanning is in progress...")
     projects = dtapi.get_projects()
     for p in projects:
-        logger.info(f"{p['name']} was found, id = {p['uuid']}")
+        logger.info(f"project {p['name']} was found, id = {p['uuid']}")
         components = dtapi.get_components_by_project_uuid(p['uuid'])
-        logger.info(f'{len(components)} were found,')
+        logger.info(f'{len(components)} components were found,')
         for c in components:
-            if 'purl' in c:
-                purl = c['purl']
-                ptype, pname, psubname, pver, _ = re.split(r'[?@/]', purl)
+            if 'purl' not in c:
+                continue
+            purl = c['purl']
+            res, ptype, pname, psubname, pver = parse_purl(purl)
+            if res:
                 pkgkey = f'{ptype}/{pname}/{psubname}'
                 repos.add(pkgkey)
                 packages.add(purl)
 
-    repos_db = db["repos"]
+
+    repos_db = model.db["repos"]
     count = len(repos)
     for p in repos:
         repo = await repos_db.find_one({"pkgkey": p})
@@ -86,21 +96,22 @@ async def start_scan():
             if len(url) != 0:
                 count -= 1
 
-    packages_db = db["packages"]
+    packages_db = model.db["packages"]
     for purl in packages:
         package = await packages_db.find_one({"purl": purl})
         if not package:
             logger.info(f'New package inserted : {purl}')
-            ptype, pname, psubname, pver, _ = re.split(r'[?@/]', purl)
-            pkgkey = f'{ptype}/{pname}/{psubname}'
-            await packages_db.insert_one({'purl':purl, 'pkgkey':pkgkey, 'github':'', 'contributors':[]})
+            res, ptype, pname, psubname, pver = parse_purl(purl)
+            if res:
+                pkgkey = f'{ptype}/{pname}/{psubname}'
+                await packages_db.insert_one({'purl':purl, 'pkgkey':pkgkey, 'github':''})
 
     logger.info(f'{count} repos should be filled')
     return {'Repos should be filled':count}
 
 @app.get("/populate")
 async def populate():
-    packages_db = db["packages"]
+    packages_db = model.db["packages"]
     pipeline = [
         {
             "$lookup": {
@@ -121,7 +132,7 @@ async def populate():
                 await packages_db.update_many({"pkgkey": r["pkgkey"]},
                                               {"$set": {"github": r["github"]}})
 
-    contributors_db = db["contributors"]
+    contributors_db = model.db["contributors"]
 
     query = {"github": {"$exists": True, "$ne": ""}}
 
@@ -139,24 +150,57 @@ async def populate():
         except Exception as e:
             logger.error(f'Error {e}')
 
+        logger.info(f'{len(contributors)} were extracted for  {github}')
         for c in contributors:
-            ivan = await contributors_db.find_one({'name': c['name']})
-            if not ivan:
-                logger.info(f'New ivan found : {c}')
-                count += 1
-                await contributors_db.insert_one(c | {'github':github})
+            await contributors_db.update_one({'email': c['email']}, 
+                                             {
+                                                 '$set': {'email': c['email'], 'name':c['name']},
+                                                 '$addToSet':{"packages": { '$each': [d['purl']] } }
+                                             },
+                                             True)
 
     return {'New contributors found': count}
 
+def compose_vuln_info(contributors):
+    info = ''
+    for c in contributors:
+        description = f"{c['description']}\n" if 'description' in c else ''
+        info += f"{c['name']} : {c['email']}\n{description}"
+
+    return info
+
 @app.get("/upload_score")
 async def upload_score():
-    packages_db = db["packages"]
-    query = {"score": {"$exists": True, "$ne": 0}}
-    cursor = packages_db.find(query)
+    contributors_db = model.db['contributors']
+    scores = defaultdict(list)
+    contributors_cur = contributors_db.find({"score": {"$exists": True, "$ne": 0}})
     count = 0
-    async for d in cursor:
-        logger.info(f'Found scored package {d}')
-        dtapi.assign_vuln_by_purl(d['purl'], dtapi_vuln_id)
+    async for c in contributors_cur:
+        count += 1
+        if 'packages' in c:
+            for p in c['packages']:
+                scores[p].append(c)
+
+    logger.info(f'{count} scored contributors were found {len(scores)}')
+
+    packages_db = model.db["packages"]
+    count = 0
+    for pkgkey, contributors in scores.items():
+        package = await packages_db.find_one({"purl": pkgkey})
+        if not package:
+            logger.info(f'No package found for : {pkgkey}')
+            continue
+        vuln_id = ''
+        if 'vuln_id' in package:
+            vuln_id = package['vuln_id']
+            dtapi.delete_vuln(vuln_id)
+            logger.info(f'Vuln {vuln_id} was deleted')
+        info = compose_vuln_info(contributors)
+        vuln_id = dtapi.create_vuln('Malicious Contributor', info)
+        logger.info(f'Vuln {vuln_id} was created')
+        await packages_db.update_one({"pkgkey": pkgkey}, {"$set": {"vuln_id": vuln_id}})
+        dtapi.assign_vuln_by_purl(pkgkey, vuln_id)
+        logger.info(f'Vuln {vuln_id} was assigned to {pkgkey} info : {info}')
         count += 1
 
-    return {'Packages uploaded': count}
+    return {'Packages were scored': count}
