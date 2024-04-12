@@ -11,9 +11,8 @@ services:
       DEEPRISK_MONGO_HOST: mongo_host
       DEEPRISK_MONGO_USER: admin
       DEEPRISK_MONGO_PASS: admin
-      DEEPRISK_DTAPI_HOST: dtrackapi_host
-      DEEPRISK_DTAPI_TOKEN: odt_wHoPlM9ODY6Ge5Harw8VNlagU7Sd4ky9
-      DEEPRISK_DTAPI_VULN_ID: 4d1064b7-981e-445d-95bc-9e96a80328dd
+      DEEPRISK_DTAPI_HOST: ${ENV_DEEPRISK_DTAPI_HOST}
+      DEEPRISK_DTAPI_TOKEN: ${ENV_DEEPRISK_DTAPI_TOKEN}
     depends_on:
       - mongo_svc
   mongo_svc:
@@ -39,56 +38,3 @@ services:
       - "./data/db/mongo:/data/db"
     depends_on:
       - mongo_svc
-  postgres_svc:
-    image: postgres:latest
-    container_name: postgres_host
-    environment:
-      POSTGRES_PASSWORD: dtrackpass
-      POSTGRES_DB: dtrack
-      POSTGRES_USER: dtrackuser
-    volumes:
-      - "./data/db/postgres:/var/lib/postgresql/data"
-  dtrackapi_svc:
-    depends_on:
-      - postgres_svc
-    image: dependencytrack/apiserver
-    container_name: dtrackapi_host
-    environment:
-      ALPINE_DATABASE_MODE: external
-      ALPINE_DATABASE_URL: jdbc:postgresql://postgres_host:5432/dtrack
-      ALPINE_DATABASE_DRIVER: org.postgresql.Driver
-      ALPINE_DATABASE_USERNAME: dtrackuser
-      ALPINE_DATABASE_PASSWORD: dtrackpass
-    deploy:
-      resources:
-        limits:
-          memory: 12288m
-        reservations:
-          memory: 8192m
-      restart_policy:
-        condition: on-failure
-    ports:
-      - '48086:8080'
-    volumes:
-      - './data/db/dtrackapi:/data'
-    restart: unless-stopped
-  dtrackfront:
-    image: dependencytrack/frontend
-    container_name: dtrackfront_host
-    depends_on:
-      - dtrackapi_svc
-    environment:
-      - API_BASE_URL=http://localhost:48086
-    ports:
-      - "48080:8080"
-    restart: unless-stopped
-  postgres_view_svc:
-    image: dpage/pgadmin4
-    container_name: postgres_view_host
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "48085:80"
-    depends_on:
-      - postgres_svc

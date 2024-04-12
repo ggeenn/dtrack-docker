@@ -27,14 +27,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-#db = None
 model = None
 dtapi = None
 
 dtapi_host = os.environ['DEEPRISK_DTAPI_HOST']
 dtapi_token = os.environ['DEEPRISK_DTAPI_TOKEN']
-#dtapi_token = 'odt_NSedF4mIzlqbexVIHpEd8tPRw1h1XAvz'
-dtapi_vuln_id = os.environ['DEEPRISK_DTAPI_VULN_ID']
 
 @app.on_event("startup")
 async def startup_db_client():
@@ -45,7 +42,7 @@ async def startup_db_client():
     dtstatus = ''
     global dtapi
     try:
-        dtapi = deptrack.DepTrack(f'http://{dtapi_host}:8080', dtapi_token)
+        dtapi = deptrack.DepTrack(dtapi_host, dtapi_token)
         projects = dtapi.get_projects()
         dtstatus = f'found {len(projects)} projects'
     except Exception as e:
@@ -74,15 +71,13 @@ async def start_scan():
         components = dtapi.get_components_by_project_uuid(p['uuid'])
         logger.info(f'{len(components)} components were found,')
         for c in components:
-            if 'purl' not in c:
+            purl = c.get('purl', None)
+            if not purl:
                 continue
-            purl = c['purl']
-            res, ptype, pname, psubname, pver = parse_purl(purl)
+            res, pkgkey, _ = parse_purl(purl)
             if res:
-                pkgkey = f'{ptype}/{pname}/{psubname}'
                 repos.add(pkgkey)
                 packages.add(purl)
-
 
     repos_db = model.db["repos"]
     count = len(repos)
@@ -101,10 +96,9 @@ async def start_scan():
         package = await packages_db.find_one({"purl": purl})
         if not package:
             logger.info(f'New package inserted : {purl}')
-            res, ptype, pname, psubname, pver = parse_purl(purl)
+            res, pkgkey, github = parse_purl(purl)
             if res:
-                pkgkey = f'{ptype}/{pname}/{psubname}'
-                await packages_db.insert_one({'purl':purl, 'pkgkey':pkgkey, 'github':''})
+                await packages_db.insert_one({'purl':purl, 'pkgkey':pkgkey, 'github':github})
 
     logger.info(f'{count} repos should be filled')
     return {'Repos should be filled':count}

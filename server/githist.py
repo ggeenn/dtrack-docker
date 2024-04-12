@@ -1,6 +1,8 @@
 import git
 import sys
-import tempfile
+import shutil
+import time
+import os
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -10,43 +12,59 @@ class AuthorInfo:
         self.email = ''
         self.count = 0    
 
-def clone_repo(repo_url, local_dir):
-    # Clone the repository
-    try:
-        repo = git.Repo.clone_from(repo_url, local_dir)
-    except Exception as e:
-        print(f"Error cloning repository: {e}")
-        return
-    
 def get_authors(repo, start_date):
     authors = defaultdict(AuthorInfo)
     for c in repo.iter_commits():
-        tm = datetime.utcfromtimestamp(c.committed_date)
+        tm = datetime.fromtimestamp(c.committed_date)
         if tm > start_date:
             a = authors[c.author.email]
             a.name = c.author.name
             a.email = c.author.email
             a.count += 1
+
     return authors
 
-def collect(path_or_url, start_date_str):
+def collect_from_repo(repo, start_date):
     result = []
-    start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-    with tempfile.TemporaryDirectory() as tmpdir:
-        if path_or_url.startswith('http'):
-            repo = git.Repo.clone_from(path_or_url, tmpdir)
-        else:
-            repo = git.Repo(path_or_url)
-        authors = get_authors(repo, start_date)
-        sorted_authors = sorted(authors.values(), key=lambda x: x.count, reverse=True)
-        for a in sorted_authors:
-            result.append({'name':a.name, 'email':a.email, 'count':a.count})
-
+    authors = get_authors(repo, start_date)
+    sorted_authors = sorted(authors.values(), key=lambda x: x.count, reverse=True)
+    for a in sorted_authors:
+        result.append({'name':a.name, 'email':a.email, 'count':a.count})
     return result
+
+def remove_dir(d):
+        try:
+            time.sleep(1)
+            shutil.rmtree(d)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError as e:
+            print(f"Failed to delete {d}: {e}")
+            return False
+
+def collect_from_url(url, start_date):
+    #tmpdir = tempfile.mkdtemp()
+    try:
+        tmpdir = os.path.join(os.getcwd(), 'tempgit')
+        if remove_dir(tmpdir):
+            with git.Repo.clone_from(url, tmpdir) as repo:
+                return collect_from_repo(repo, start_date)
+        return []
+    finally:
+        remove_dir(tmpdir)
+
+def collect(path_or_url, start_date_str):
+    start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+    if path_or_url.startswith('http'):
+        return collect_from_url(path_or_url, start_date)
+
+    with git.Repo(path_or_url) as repo:
+        return collect_from_repo(repo, start_date)
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: python script.py <repository_path|repo_url> [startDate]")
+        print(f'Usage: python {sys.argv[0]} <repo_path|repo_url> [start_date]')
         print("Date format : YYYY-MM-DD (2022-03-01)")
         sys.exit(1)
 

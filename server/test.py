@@ -1,7 +1,17 @@
+import os
 import deptrack
+import deeprisk_model
 
-dt = deptrack.DepTrack('http://localhost:48086', 'odt_NSedF4mIzlqbexVIHpEd8tPRw1h1XAvz')
-vid = dt.create_vuln('Malicious Contributor', 'Ivan Ivanov')
-print(f'{vid}')
-purl = 'pkg:maven/androidx.annotation/annotation@1.6.0?type=jar'
-dt.assign_vuln_by_purl(purl, vid)
+#dtapi_host = 'https://dependency-track.oak.in.ua'#os.environ['DEEPRISK_DTAPI_HOST']
+#dtapi_token = 'JZfG1TiVaXIrmikDNTcutSU3QAtb5rhz'#os.environ['DEEPRISK_DTAPI_TOKEN']
+#
+#dtapi = deptrack.DepTrack(f'{dtapi_host}', dtapi_token)
+#projects = dtapi.get_projects()
+#for p in projects:
+#    print(f"{p['name']} was found, id = {p['uuid']}")
+
+#u = 'pkg:golang/git.oak.in.ua/volia/zahyst-go-common@v0.0.0-20240117152438-4c093fcda720'
+#u = 'pkg:npm/abab@1.0.4'
+#u = 'pkg:deb/acl@2.3.1?arch=amd64&distro=debian-12&distro_name=bookworm'
+u = 'pkg:deb/ubuntu/bsdutils@1:2.34-0.1ubuntu9.4?arch=amd64&distro=ubuntu-20.04&upstream=util-linux'
+print(deeprisk_model.parse_purl(u))
